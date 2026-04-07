@@ -21,6 +21,7 @@ export interface JiraTask {
   priority: 'High' | 'Medium' | 'Low';
   status: 'In Progress' | 'Resolved' | 'To Do';
   releaseId?: string;
+  branch?: string;
 }
 
 export interface Approver {

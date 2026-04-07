@@ -30,6 +30,7 @@ import { MOCK_RELEASES } from '../constants';
 import { Screen, Release, MergeRequest } from '../types';
 import { fetchPullRequests } from '../services/githubService';
 import CreatePRModal from './CreatePRModal';
+import CreateBranchModal from './CreateBranchModal';
 
 interface ReleasesProps {
   onNavigate: (screen: Screen) => void;
@@ -46,14 +47,37 @@ export default function Releases({ onNavigate, selectedReleaseId, onSelectReleas
   const [githubPRs, setGithubPRs] = useState<MergeRequest[]>([]);
   const [loadingPRs, setLoadingPRs] = useState(false);
   const [isCreatePRModalOpen, setIsCreatePRModalOpen] = useState(false);
+  const [releases, setReleases] = useState<Release[]>(MOCK_RELEASES);
+  const [isCreateBranchModalOpen, setIsCreateBranchModalOpen] = useState(false);
+  const [selectedTaskIdForBranch, setSelectedTaskIdForBranch] = useState<string | null>(null);
 
-  const selectedRelease = MOCK_RELEASES.find(r => r.id === selectedReleaseId);
+  const selectedRelease = releases.find(r => r.id === selectedReleaseId);
 
   useEffect(() => {
     if (selectedReleaseId) {
       loadGithubPRs();
     }
   }, [selectedReleaseId]);
+
+  const handleBranchCreated = (repoName: string, branchName: string, baseBranch: string) => {
+    if (!selectedTaskIdForBranch) return;
+
+    // Update state to simulate persistence
+    setReleases(prev => prev.map(r => {
+      if (r.id === selectedReleaseId) {
+        return {
+          ...r,
+          tasks: r.tasks.map(t => t.id === selectedTaskIdForBranch ? { ...t, branch: `${repoName}:${branchName}` } : t)
+        };
+      }
+      return r;
+    }));
+
+    // Open GitHub comparison/creation page with the specific base branch
+    window.open(`https://github.com/samrogu/${repoName}/compare/${baseBranch}...${branchName}`, '_blank');
+    setIsCreateBranchModalOpen(false);
+    setSelectedTaskIdForBranch(null);
+  };
 
   const loadGithubPRs = async () => {
     setLoadingPRs(true);
@@ -373,11 +397,60 @@ export default function Releases({ onNavigate, selectedReleaseId, onSelectReleas
                   <div key={idx} className="flex items-center justify-between p-4 bg-surface-low rounded-xl border border-white/5 hover:border-primary/30 transition-all cursor-pointer group">
                     <div className="flex items-center gap-4">
                       <div className="text-[10px] font-mono font-bold text-on-surface-variant w-16">{task.id}</div>
-                      <h4 className="text-sm font-semibold text-on-surface">{task.title}</h4>
+                      <div>
+                        <h4 className="text-sm font-semibold text-on-surface">{task.title}</h4>
+                        {task.branch && (
+                          <div className="flex items-center gap-2 mt-1.5">
+                            <div className="flex items-center gap-1.5 px-2 py-0.5 bg-primary/10 rounded-md border border-primary/20">
+                              <GitBranch size={10} className="text-primary" />
+                              <span className="text-[10px] font-mono text-primary font-bold">{task.branch}</span>
+                            </div>
+                            <button 
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                navigator.clipboard.writeText(task.branch || '');
+                              }}
+                              className="p-1 hover:bg-surface-bright rounded text-on-surface-variant hover:text-primary transition-colors"
+                              title="Copy branch name"
+                            >
+                              <FileText size={10} />
+                            </button>
+                            <a 
+                              href={`https://github.com/org/repo/tree/${task.branch}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              onClick={(e) => e.stopPropagation()}
+                              className="p-1 hover:bg-surface-bright rounded text-on-surface-variant hover:text-primary transition-colors"
+                              title="View on GitHub"
+                            >
+                              <ExternalLink size={10} />
+                            </a>
+                            <span className="flex items-center gap-1 text-[9px] text-green-400 font-bold uppercase tracking-wider ml-1">
+                              <span className="w-1 h-1 rounded-full bg-green-400 animate-pulse"></span>
+                              Linked
+                            </span>
+                          </div>
+                        )}
+                      </div>
                     </div>
                     <div className="flex items-center gap-6">
+                      {!task.branch && (
+                        <button 
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setSelectedTaskIdForBranch(task.id);
+                            setIsCreateBranchModalOpen(true);
+                          }}
+                          className="px-2.5 py-1.5 bg-primary/10 text-primary hover:bg-primary/20 text-[10px] font-bold rounded-lg border border-primary/20 transition-all flex items-center gap-1.5 opacity-0 group-hover:opacity-100"
+                        >
+                          <GitBranch size={12} />
+                          Create Branch
+                        </button>
+                      )}
                       <div className="flex items-center gap-2">
-                        <div className="w-5 h-5 rounded-full bg-surface-bright border border-white/10"></div>
+                        <div className="w-5 h-5 rounded-full bg-surface-bright border border-white/10 overflow-hidden">
+                          <img src={`https://ui-avatars.com/api/?name=${encodeURIComponent(task.assignee)}&background=random`} alt={task.assignee} className="w-full h-full object-cover" />
+                        </div>
                         <span className="text-xs text-on-surface-variant">{task.assignee}</span>
                       </div>
                       <span className={`px-2.5 py-1 bg-surface-container-highest text-on-surface border border-white/5 rounded text-[9px] font-black uppercase`}>
@@ -727,6 +800,17 @@ export default function Releases({ onNavigate, selectedReleaseId, onSelectReleas
             owner="samrogu"
             initialRepo="rapid-config-server"
             repositories={selectedRelease.repositories.map(r => ({ id: r.id, name: r.name }))}
+          />
+        )}
+        {isCreateBranchModalOpen && selectedTaskIdForBranch && (
+          <CreateBranchModal
+            isOpen={isCreateBranchModalOpen}
+            onClose={() => setIsCreateBranchModalOpen(false)}
+            onSuccess={handleBranchCreated}
+            owner="samrogu"
+            repositories={selectedRelease.repositories}
+            taskId={selectedTaskIdForBranch}
+            taskTitle={selectedRelease.tasks.find(t => t.id === selectedTaskIdForBranch)?.title || ''}
           />
         )}
       </AnimatePresence>
