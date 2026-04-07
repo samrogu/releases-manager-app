@@ -1,0 +1,5 @@
+{
+  "name": "OpsControl",
+  "description": "Unified DevOps Command Center for managing releases, repositories, and pipelines with high-density precision.",
+  "requestFramePermissions": []
+}
