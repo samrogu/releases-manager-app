@@ -22,6 +22,7 @@ export default function Layout({ children, currentScreen, onScreenChange, hideHe
   const navItems = [
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
     { id: 'releases', label: 'Releases', icon: Rocket },
+    { id: 'workflows', label: 'Workflows', icon: Settings },
   ] as const;
 
   return (

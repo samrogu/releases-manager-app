@@ -22,62 +22,90 @@ import {
   Activity as ActivityIcon,
   MessageSquare,
   Loader2,
-  ArrowRight
+  ArrowRight,
+  Construction,
+  TestTube,
+  Cloud
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
 import { MOCK_RELEASES } from '../constants';
-import { Screen, Release, MergeRequest } from '../types';
+import { Screen, Release, MergeRequest, WorkflowTemplate } from '../types';
 import { fetchPullRequests } from '../services/githubService';
 import CreatePRModal from './CreatePRModal';
 import CreateBranchModal from './CreateBranchModal';
+import WorkflowView from './WorkflowView';
+import PipelineEditor from './PipelineEditor';
+import WorkflowYamlEditor from './WorkflowYamlEditor';
 
 interface ReleasesProps {
   onNavigate: (screen: Screen) => void;
   selectedReleaseId: string | null;
   onSelectRelease: (id: string | null) => void;
   onSelectMerge?: (id: string) => void;
+  globalWorkflows: Record<string, WorkflowTemplate>;
 }
 
 type TabType = 'overview' | 'tasks' | 'repositories' | 'pipelines' | 'activity' | 'settings';
 
-export default function Releases({ onNavigate, selectedReleaseId, onSelectRelease, onSelectMerge }: ReleasesProps) {
+export default function Releases({ onNavigate, selectedReleaseId, onSelectRelease, onSelectMerge, globalWorkflows }: ReleasesProps) {
   const [activeTab, setActiveTab] = useState<TabType>('overview');
   const [approvals, setApprovals] = useState<Record<string, Record<string, boolean>>>({});
   const [githubPRs, setGithubPRs] = useState<MergeRequest[]>([]);
   const [loadingPRs, setLoadingPRs] = useState(false);
   const [isCreatePRModalOpen, setIsCreatePRModalOpen] = useState(false);
-  const [releases, setReleases] = useState<Release[]>(MOCK_RELEASES);
   const [isCreateBranchModalOpen, setIsCreateBranchModalOpen] = useState(false);
-  const [selectedTaskIdForBranch, setSelectedTaskIdForBranch] = useState<string | null>(null);
+  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
+  const [taskBranches, setTaskBranches] = useState<Record<string, string>>({});
+  const [repoWorkflows, setRepoWorkflows] = useState<Record<string, any[]>>({});
+  const [selectedRepoId, setSelectedRepoId] = useState<string>('');
 
-  const selectedRelease = releases.find(r => r.id === selectedReleaseId);
+  const selectedRelease = MOCK_RELEASES.find(r => r.id === selectedReleaseId);
+
+  useEffect(() => {
+    if (selectedRelease && selectedRelease.repositories.length > 0) {
+      setSelectedRepoId(selectedRelease.repositories[0].id);
+    }
+  }, [selectedReleaseId]);
+
+  useEffect(() => {
+    if (selectedRelease) {
+      const initialWorkflows: Record<string, any[]> = {};
+      selectedRelease.repositories.forEach(repo => {
+        initialWorkflows[repo.id] = [
+          { id: 'ci-build', name: 'Build', type: 'CI', status: 'success', icon: Construction },
+          { id: 'ci-test', name: 'Unit Tests', type: 'CI', status: 'success', icon: TestTube },
+          { id: 'ci-lint', name: 'Linting', type: 'CI', status: 'success', icon: Terminal },
+          { id: 'ci-security', name: 'Security Scan', type: 'CI', status: 'running', icon: ShieldCheck },
+          { id: 'cd-dev', name: 'Deploy Dev', type: 'CD', status: 'waiting_approval', icon: Cloud },
+          { id: 'cd-staging', name: 'Deploy Staging', type: 'CD', status: 'pending', icon: Rocket },
+          { id: 'cd-prod', name: 'Deploy Prod', type: 'CD', status: 'pending', icon: ShieldCheck },
+        ];
+      });
+      setRepoWorkflows(initialWorkflows);
+    }
+  }, [selectedReleaseId]);
+
+  const handleApproveStep = (repoId: string, stepId: string) => {
+    setRepoWorkflows(prev => {
+      const workflow = [...(prev[repoId] || [])];
+      const stepIndex = workflow.findIndex(s => s.id === stepId);
+      if (stepIndex !== -1) {
+        workflow[stepIndex] = { ...workflow[stepIndex], status: 'success' };
+        // Advance next step if it was pending
+        if (stepIndex + 1 < workflow.length && workflow[stepIndex + 1].status === 'pending') {
+          workflow[stepIndex + 1] = { ...workflow[stepIndex + 1], status: 'waiting_approval' };
+        }
+      }
+      return { ...prev, [repoId]: workflow };
+    });
+  };
 
   useEffect(() => {
     if (selectedReleaseId) {
       loadGithubPRs();
     }
   }, [selectedReleaseId]);
-
-  const handleBranchCreated = (repoName: string, branchName: string, baseBranch: string) => {
-    if (!selectedTaskIdForBranch) return;
-
-    // Update state to simulate persistence
-    setReleases(prev => prev.map(r => {
-      if (r.id === selectedReleaseId) {
-        return {
-          ...r,
-          tasks: r.tasks.map(t => t.id === selectedTaskIdForBranch ? { ...t, branch: `${repoName}:${branchName}` } : t)
-        };
-      }
-      return r;
-    }));
-
-    // Open GitHub comparison/creation page with the specific base branch
-    window.open(`https://github.com/samrogu/${repoName}/compare/${baseBranch}...${branchName}`, '_blank');
-    setIsCreateBranchModalOpen(false);
-    setSelectedTaskIdForBranch(null);
-  };
 
   const loadGithubPRs = async () => {
     setLoadingPRs(true);
@@ -393,72 +421,51 @@ export default function Releases({ onNavigate, selectedReleaseId, onSelectReleas
                 </button>
               </div>
               <div className="p-6 space-y-3">
-                {selectedRelease.tasks.map((task, idx) => (
-                  <div key={idx} className="flex items-center justify-between p-4 bg-surface-low rounded-xl border border-white/5 hover:border-primary/30 transition-all cursor-pointer group">
-                    <div className="flex items-center gap-4">
-                      <div className="text-[10px] font-mono font-bold text-on-surface-variant w-16">{task.id}</div>
-                      <div>
-                        <h4 className="text-sm font-semibold text-on-surface">{task.title}</h4>
-                        {task.branch && (
-                          <div className="flex items-center gap-2 mt-1.5">
-                            <div className="flex items-center gap-1.5 px-2 py-0.5 bg-primary/10 rounded-md border border-primary/20">
+                {selectedRelease.tasks.map((task, idx) => {
+                  const linkedBranch = taskBranches[task.id] || task.branchName;
+                  return (
+                    <div key={idx} className="flex items-center justify-between p-4 bg-surface-low rounded-xl border border-white/5 hover:border-primary/30 transition-all group">
+                      <div className="flex items-center gap-4">
+                        <div className="text-[10px] font-mono font-bold text-on-surface-variant w-16">{task.id}</div>
+                        <div>
+                          <h4 className="text-sm font-semibold text-on-surface">{task.title}</h4>
+                          {linkedBranch && (
+                            <div className="flex items-center gap-1.5 mt-1">
                               <GitBranch size={10} className="text-primary" />
-                              <span className="text-[10px] font-mono text-primary font-bold">{task.branch}</span>
+                              <span className="text-[10px] font-mono text-primary font-bold">{linkedBranch}</span>
                             </div>
-                            <button 
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                navigator.clipboard.writeText(task.branch || '');
-                              }}
-                              className="p-1 hover:bg-surface-bright rounded text-on-surface-variant hover:text-primary transition-colors"
-                              title="Copy branch name"
-                            >
-                              <FileText size={10} />
-                            </button>
-                            <a 
-                              href={`https://github.com/org/repo/tree/${task.branch}`}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              onClick={(e) => e.stopPropagation()}
-                              className="p-1 hover:bg-surface-bright rounded text-on-surface-variant hover:text-primary transition-colors"
-                              title="View on GitHub"
-                            >
-                              <ExternalLink size={10} />
-                            </a>
-                            <span className="flex items-center gap-1 text-[9px] text-green-400 font-bold uppercase tracking-wider ml-1">
-                              <span className="w-1 h-1 rounded-full bg-green-400 animate-pulse"></span>
-                              Linked
-                            </span>
+                          )}
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-6">
+                        {!linkedBranch ? (
+                          <button 
+                            onClick={() => {
+                              setSelectedTaskId(task.id);
+                              setIsCreateBranchModalOpen(true);
+                            }}
+                            className="px-3 py-1.5 bg-primary/10 text-primary text-[10px] font-black rounded-lg border border-primary/20 hover:bg-primary/20 transition-all flex items-center gap-1.5"
+                          >
+                            <Plus size={12} />
+                            CREATE BRANCH
+                          </button>
+                        ) : (
+                          <div className="flex items-center gap-2 px-3 py-1.5 bg-surface-highest text-on-surface-variant text-[10px] font-black rounded-lg border border-white/5">
+                            <CheckCircle2 size={12} className="text-tertiary" />
+                            BRANCH LINKED
                           </div>
                         )}
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-6">
-                      {!task.branch && (
-                        <button 
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setSelectedTaskIdForBranch(task.id);
-                            setIsCreateBranchModalOpen(true);
-                          }}
-                          className="px-2.5 py-1.5 bg-primary/10 text-primary hover:bg-primary/20 text-[10px] font-bold rounded-lg border border-primary/20 transition-all flex items-center gap-1.5 opacity-0 group-hover:opacity-100"
-                        >
-                          <GitBranch size={12} />
-                          Create Branch
-                        </button>
-                      )}
-                      <div className="flex items-center gap-2">
-                        <div className="w-5 h-5 rounded-full bg-surface-bright border border-white/10 overflow-hidden">
-                          <img src={`https://ui-avatars.com/api/?name=${encodeURIComponent(task.assignee)}&background=random`} alt={task.assignee} className="w-full h-full object-cover" />
+                        <div className="flex items-center gap-2">
+                          <div className="w-5 h-5 rounded-full bg-surface-bright border border-white/10"></div>
+                          <span className="text-xs text-on-surface-variant">{task.assignee}</span>
                         </div>
-                        <span className="text-xs text-on-surface-variant">{task.assignee}</span>
+                        <span className={`px-2.5 py-1 bg-surface-container-highest text-on-surface border border-white/5 rounded text-[9px] font-black uppercase`}>
+                          {task.status}
+                        </span>
                       </div>
-                      <span className={`px-2.5 py-1 bg-surface-container-highest text-on-surface border border-white/5 rounded text-[9px] font-black uppercase`}>
-                        {task.status}
-                      </span>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
           )}
@@ -507,9 +514,9 @@ export default function Releases({ onNavigate, selectedReleaseId, onSelectReleas
                       </div>
                     </div>
 
-                    <div className="p-6 grid grid-cols-1 lg:grid-cols-3 gap-8">
+                    <div className="p-6 grid grid-cols-1 lg:grid-cols-12 gap-8">
                       {/* 1. Merges / PRs */}
-                      <div className="space-y-4">
+                      <div className="lg:col-span-3 space-y-4">
                         <div className="flex items-center justify-between">
                           <h4 className="text-[10px] font-black text-on-surface-variant uppercase tracking-[0.2em] flex items-center gap-2">
                             <Merge size={14} className="text-primary" /> Active Merges
@@ -558,86 +565,13 @@ export default function Releases({ onNavigate, selectedReleaseId, onSelectReleas
                         </div>
                       </div>
 
-                      {/* 2. Environment Approvals & Promotion */}
-                      <div className="space-y-4">
-                        <h4 className="text-[10px] font-black text-on-surface-variant uppercase tracking-[0.2em] flex items-center gap-2">
-                          <ShieldCheck size={14} className="text-tertiary" /> Env Approvals & Promotion
-                        </h4>
-                        <div className="space-y-3">
-                          {repo.approvals.map((app, aIdx) => {
-                            const isApproved = approvals[repo.id]?.[app.env] || app.status === 'APPROVED';
-                            const rule = repo.deploymentRules?.find(r => r.env === app.env);
-                            const isPromotion = app.env !== 'Development';
-                            
-                            return (
-                              <div key={aIdx} className="flex items-center justify-between p-3 bg-surface-low rounded-xl border border-white/5">
-                                <div className="flex items-center gap-3">
-                                  <div className={`w-2 h-2 rounded-full ${isApproved ? 'bg-tertiary shadow-[0_0_8px_#4ae176]' : 'bg-surface-highest'}`}></div>
-                                  <div>
-                                    <span className="text-xs font-bold text-white">{app.env}</span>
-                                    {rule && (
-                                      <p className="text-[8px] text-on-surface-variant font-medium">Req: {rule.requiredApprovers} approvals</p>
-                                    )}
-                                  </div>
-                                </div>
-                                {isApproved ? (
-                                  <div className="text-right flex items-center gap-2">
-                                    <div>
-                                      <p className="text-[9px] text-tertiary font-bold">APPROVED</p>
-                                      <p className="text-[8px] text-on-surface-variant">{app.approvedBy || 'Current User'}</p>
-                                    </div>
-                                    <button 
-                                      onClick={() => toggleApproval(repo.id, app.env)}
-                                      className="text-on-surface-variant hover:text-error transition-colors"
-                                    >
-                                      <X size={12} />
-                                    </button>
-                                  </div>
-                                ) : (
-                                  <button 
-                                    onClick={() => toggleApproval(repo.id, app.env)}
-                                    className={`px-3 py-1 text-[9px] font-black rounded-lg border transition-all ${
-                                      isPromotion 
-                                        ? 'bg-tertiary/10 text-tertiary border-tertiary/20 hover:bg-tertiary/20' 
-                                        : 'bg-primary/10 text-primary border-primary/20 hover:bg-primary/20'
-                                    }`}
-                                  >
-                                    {isPromotion ? 'PROMOTE' : 'APPROVE'}
-                                  </button>
-                                )}
-                              </div>
-                            );
-                          })}
-                        </div>
-                      </div>
-
-                      {/* 3. Repo Pipelines */}
-                      <div className="space-y-4">
-                        <h4 className="text-[10px] font-black text-on-surface-variant uppercase tracking-[0.2em] flex items-center gap-2">
-                          <Terminal size={14} className="text-primary" /> Repo Pipelines
-                        </h4>
-                        <div className="space-y-3">
-                          {repo.pipelines.map((pipe, pIdx) => (
-                            <div key={pIdx} className="flex items-center gap-4">
-                              <div className={`w-8 h-8 rounded-lg flex items-center justify-center border ${
-                                pipe.status === 'success' ? 'bg-tertiary/10 border-tertiary/20 text-tertiary' :
-                                pipe.status === 'running' ? 'bg-primary/10 border-primary/20 text-primary animate-pulse' :
-                                'bg-surface-low border-white/5 text-on-surface-variant'
-                              }`}>
-                                {pipe.status === 'success' ? <CheckCircle2 size={16} /> : <ActivityIcon size={16} />}
-                              </div>
-                              <div className="flex-1">
-                                <div className="flex justify-between items-center mb-1">
-                                  <span className="text-xs font-bold text-white">{pipe.name}</span>
-                                  <span className="text-[9px] text-on-surface-variant uppercase font-bold">{pipe.status}</span>
-                                </div>
-                                <div className="w-full h-1 bg-surface-container-lowest rounded-full overflow-hidden">
-                                  <div className={`h-full ${pipe.status === 'success' ? 'bg-tertiary' : 'bg-primary'} ${pipe.status === 'running' ? 'w-1/2' : 'w-full'}`}></div>
-                                </div>
-                              </div>
-                            </div>
-                          ))}
-                        </div>
+                      {/* 2. Workflow View */}
+                      <div className="lg:col-span-9">
+                        <WorkflowView 
+                          repoName={repo.name}
+                          steps={repoWorkflows[repo.id] || []}
+                          onApprove={(stepId) => handleApproveStep(repo.id, stepId)}
+                        />
                       </div>
                     </div>
                   </div>
@@ -647,38 +581,40 @@ export default function Releases({ onNavigate, selectedReleaseId, onSelectReleas
           )}
 
           {activeTab === 'pipelines' && (
-            <div className="bg-surface-high rounded-2xl border border-white/5 overflow-hidden max-w-4xl">
-              <div className="px-6 py-4 bg-surface-bright flex items-center justify-between border-b border-white/5">
+            <div className="space-y-8">
+              <div className="flex items-center justify-between">
                 <div className="flex items-center gap-3">
-                  <Terminal className="text-primary" size={20} />
-                  <h2 
-                    className="text-lg font-headline font-bold text-white"
-                  >
-                    Execution Pipeline
-                  </h2>
+                  <Terminal className="text-primary" size={24} />
+                  <h2 className="text-xl font-headline font-bold text-white">Execution Pipelines</h2>
+                  <span className="bg-primary/10 text-primary px-3 py-1 rounded-full text-xs font-bold">
+                    {selectedRelease.repositories.length} ACTIVE WORKFLOWS
+                  </span>
                 </div>
+                <button className="px-4 py-2 bg-surface-high text-on-surface text-xs font-bold rounded-xl border border-white/5 hover:bg-surface-bright transition-colors flex items-center gap-2">
+                  <ActivityIcon size={16} />
+                  Global History
+                </button>
               </div>
-              <div className="p-6 space-y-6">
-                {selectedRelease.pipelines.map((pipeline, idx) => (
-                  <div key={idx} className="space-y-3">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <Settings2 className="text-primary" size={18} />
-                        <span className="text-xs font-bold text-white uppercase tracking-wider">{pipeline.name}</span>
+
+              <div className="space-y-12">
+                {selectedRelease.repositories.map((repo) => (
+                  <div key={repo.id} className="space-y-4">
+                    <div className="flex items-center gap-3 px-2">
+                      <div className="w-8 h-8 rounded-lg bg-surface-high flex items-center justify-center border border-white/5">
+                        <GitBranch className="text-primary" size={16} />
                       </div>
-                      <div className="flex items-center gap-4">
-                        <span className={`text-[10px] font-mono ${pipeline.status === 'success' ? 'text-tertiary' : 'text-primary'}`}>
-                          {pipeline.status.toUpperCase()}
-                        </span>
-                        <div className="w-32 h-1.5 bg-surface-container-lowest rounded-full overflow-hidden">
-                          <div className={`h-full ${pipeline.status === 'success' ? 'bg-tertiary' : 'bg-primary'} w-full`}></div>
-                        </div>
+                      <div>
+                        <h3 className="text-sm font-bold text-white">{repo.name}</h3>
+                        <p className="text-[10px] text-on-surface-variant font-mono uppercase tracking-widest">{repo.branch}</p>
                       </div>
                     </div>
+                    <WorkflowView 
+                      repoName={repo.name}
+                      steps={repoWorkflows[repo.id] || []}
+                      onApprove={(stepId) => handleApproveStep(repo.id, stepId)}
+                    />
                   </div>
                 ))}
-                <div className="h-px bg-white/5"></div>
-                <button className="w-full py-3 bg-primary/10 text-primary text-xs font-bold rounded-xl border border-primary/20 hover:bg-primary/20 transition-all">Trigger Force Sync</button>
               </div>
             </div>
           )}
@@ -715,41 +651,88 @@ export default function Releases({ onNavigate, selectedReleaseId, onSelectReleas
             </div>
           )}
           {activeTab === 'settings' && (
-            <div className="bg-surface-high rounded-2xl border border-white/5 p-8 max-w-2xl space-y-8">
-              <div className="space-y-2">
-                <h2 className="text-xl font-headline font-bold text-white">Release Configuration</h2>
-                <p className="text-sm text-on-surface-variant">Manage environment rules, notification hooks, and deployment windows for this release.</p>
-              </div>
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
+              <div className="lg:col-span-6 space-y-8">
+                <div className="bg-surface-high rounded-2xl border border-white/5 p-8 space-y-8">
+                  <div className="space-y-2">
+                    <h2 className="text-xl font-headline font-bold text-white">Workflow Assignment</h2>
+                    <p className="text-sm text-on-surface-variant">Assign a global workflow template to a repository in this release.</p>
+                  </div>
 
-              <div className="space-y-6">
-                <div className="space-y-4">
-                  <h3 className="text-xs font-black text-white uppercase tracking-widest">Deployment Windows</h3>
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="p-4 bg-surface-low rounded-xl border border-white/5">
-                      <p className="text-[10px] font-bold text-on-surface-variant uppercase mb-1">Start Date</p>
-                      <p className="text-sm font-bold text-white">Apr 10, 2026</p>
+                  <div className="space-y-6">
+                    <div className="space-y-2">
+                      <label className="text-[10px] font-black text-on-surface-variant uppercase tracking-widest ml-1">Select Repository</label>
+                      <select 
+                        value={selectedRepoId}
+                        onChange={(e) => setSelectedRepoId(e.target.value)}
+                        className="w-full bg-surface-container-lowest border border-white/5 rounded-xl py-3 px-4 text-xs focus:ring-2 focus:ring-primary/30 outline-none transition-all text-white appearance-none"
+                      >
+                        {selectedRelease.repositories.map(repo => (
+                          <option key={repo.id} value={repo.id}>{repo.name}</option>
+                        ))}
+                      </select>
                     </div>
-                    <div className="p-4 bg-surface-low rounded-xl border border-white/5">
-                      <p className="text-[10px] font-bold text-on-surface-variant uppercase mb-1">Freeze Period</p>
-                      <p className="text-sm font-bold text-white">None active</p>
+
+                    <div className="space-y-4">
+                      <div className="flex items-center justify-between">
+                        <h3 className="text-xs font-black text-white uppercase tracking-widest">Available Templates</h3>
+                        <button 
+                          onClick={() => onNavigate('workflows')}
+                          className="text-[10px] font-bold text-primary hover:underline"
+                        >
+                          Manage Templates
+                        </button>
+                      </div>
+                      <div className="space-y-2">
+                        {Object.keys(globalWorkflows).map((wfName) => {
+                          const template = globalWorkflows[wfName];
+                          const latestVersion = template.versions.find(v => v.version === template.currentVersion);
+                          return (
+                            <button 
+                              key={wfName}
+                              onClick={() => {
+                                if (latestVersion) {
+                                  setRepoWorkflows(prev => ({
+                                    ...prev,
+                                    [selectedRepoId]: latestVersion.steps.map(s => ({ ...s, status: 'pending' }))
+                                  }));
+                                }
+                              }}
+                              className="w-full flex items-center justify-between p-4 bg-surface-low rounded-xl border border-white/5 hover:border-primary/30 transition-all group"
+                            >
+                              <div className="flex items-center gap-3">
+                                <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center text-primary">
+                                  <Terminal size={16} />
+                                </div>
+                                <div className="text-left">
+                                  <span className="text-xs font-bold text-white block">{wfName}</span>
+                                  <span className="text-[9px] text-on-surface-variant font-mono">v{template.currentVersion}</span>
+                                </div>
+                              </div>
+                              <span className="text-[9px] font-black text-primary uppercase bg-primary/10 px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity">Assign</span>
+                            </button>
+                          );
+                        })}
+                      </div>
                     </div>
                   </div>
                 </div>
+              </div>
 
-                <div className="space-y-4">
-                  <h3 className="text-xs font-black text-white uppercase tracking-widest">Notification Channels</h3>
+              <div className="lg:col-span-6 space-y-8">
+                <div className="bg-surface-high rounded-2xl border border-white/5 p-8 space-y-8">
                   <div className="space-y-2">
-                    {['#ops-deployments', '#release-phoenix-warroom'].map((channel, i) => (
-                      <div key={i} className="flex items-center justify-between p-3 bg-surface-low rounded-xl border border-white/5">
-                        <div className="flex items-center gap-3">
-                          <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center text-primary">
-                            <MessageSquare size={16} />
-                          </div>
-                          <span className="text-xs font-bold text-white">{channel}</span>
-                        </div>
-                        <span className="text-[10px] font-bold text-tertiary uppercase">Active</span>
+                    <h2 className="text-xl font-headline font-bold text-white">Release Info</h2>
+                    <p className="text-sm text-on-surface-variant">General release configuration.</p>
+                  </div>
+                  <div className="space-y-4">
+                    <h3 className="text-xs font-black text-white uppercase tracking-widest">Deployment Windows</h3>
+                    <div className="grid grid-cols-1 gap-4">
+                      <div className="p-4 bg-surface-low rounded-xl border border-white/5">
+                        <p className="text-[10px] font-bold text-on-surface-variant uppercase mb-1">Start Date</p>
+                        <p className="text-sm font-bold text-white">Apr 10, 2026</p>
                       </div>
-                    ))}
+                    </div>
                   </div>
                 </div>
               </div>
@@ -802,15 +785,25 @@ export default function Releases({ onNavigate, selectedReleaseId, onSelectReleas
             repositories={selectedRelease.repositories.map(r => ({ id: r.id, name: r.name }))}
           />
         )}
-        {isCreateBranchModalOpen && selectedTaskIdForBranch && (
-          <CreateBranchModal
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {isCreateBranchModalOpen && (
+          <CreateBranchModal 
             isOpen={isCreateBranchModalOpen}
-            onClose={() => setIsCreateBranchModalOpen(false)}
-            onSuccess={handleBranchCreated}
+            onClose={() => {
+              setIsCreateBranchModalOpen(false);
+              setSelectedTaskId(null);
+            }}
+            onSuccess={(branchName) => {
+              if (selectedTaskId) {
+                setTaskBranches(prev => ({ ...prev, [selectedTaskId]: branchName }));
+              }
+            }}
             owner="samrogu"
-            repositories={selectedRelease.repositories}
-            taskId={selectedTaskIdForBranch}
-            taskTitle={selectedRelease.tasks.find(t => t.id === selectedTaskIdForBranch)?.title || ''}
+            repositories={selectedRelease.repositories.map(r => ({ id: r.id, name: r.name }))}
+            initialRepo="rapid-config-server"
+            suggestedBranchName={selectedTaskId ? `feature/${selectedTaskId.toLowerCase()}` : undefined}
           />
         )}
       </AnimatePresence>

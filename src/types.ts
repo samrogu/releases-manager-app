@@ -11,7 +11,24 @@ export interface Release {
   pipelines: PipelineStage[];
 }
 
-export type Screen = 'dashboard' | 'releases';
+export type Screen = 'dashboard' | 'releases' | 'workflows';
+
+export interface WorkflowVersion {
+  id: string;
+  version: number;
+  timestamp: string;
+  author: string;
+  description: string;
+  steps: any[];
+}
+
+export interface WorkflowTemplate {
+  id: string;
+  name: string;
+  description: string;
+  versions: WorkflowVersion[];
+  currentVersion: number;
+}
 
 export interface JiraTask {
   id: string;
@@ -21,7 +38,7 @@ export interface JiraTask {
   priority: 'High' | 'Medium' | 'Low';
   status: 'In Progress' | 'Resolved' | 'To Do';
   releaseId?: string;
-  branch?: string;
+  branchName?: string;
 }
 
 export interface Approver {
@@ -103,4 +120,13 @@ export interface Activity {
   timestamp: string;
   details?: string;
   isBot?: boolean;
+}
+
+export interface ExecutionRun {
+  id: string;
+  name: string;
+  status: 'success' | 'failed' | 'running' | 'waiting_approval';
+  startedAt: string;
+  duration: string;
+  steps: { name: string; status: 'success' | 'failed' | 'running' | 'pending' }[];
 }

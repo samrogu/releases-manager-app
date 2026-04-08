@@ -147,3 +147,29 @@ export async function createPullRequest(owner: string, repo: string, title: stri
   }
   return response.json();
 }
+
+export async function createBranch(owner: string, repo: string, branchName: string, baseBranch: string): Promise<void> {
+  // 1. Get the SHA of the base branch
+  const baseResponse = await fetch(`${GITHUB_API_BASE}/repos/${owner}/${repo}/git/ref/heads/${baseBranch}`);
+  if (!baseResponse.ok) throw new Error(`Failed to fetch base branch ${baseBranch}`);
+  const baseData = await baseResponse.json();
+  const sha = baseData.object.sha;
+
+  // 2. Create the new branch
+  const response = await fetch(`${GITHUB_API_BASE}/repos/${owner}/${repo}/git/refs`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Accept': 'application/vnd.github.v3+json',
+    },
+    body: JSON.stringify({
+      ref: `refs/heads/${branchName}`,
+      sha,
+    }),
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json();
+    throw new Error(errorData.message || 'Failed to create branch');
+  }
+}

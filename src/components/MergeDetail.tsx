@@ -14,10 +14,12 @@ import {
   X,
   Loader2,
   Clock,
-  ArrowLeft
+  ArrowLeft,
+  Circle,
+  Terminal
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Approver, ValidationCheck } from '../types';
+import { Approver, ValidationCheck, ExecutionRun } from '../types';
 import { 
   fetchPRDetails, 
   fetchPRReviews, 
@@ -46,7 +48,8 @@ export default function MergeDetail({ isOpen, onClose, selectedMergeId }: MergeD
   const [files, setFiles] = useState<GitHubFile[]>([]);
   const [commits, setCommits] = useState<GitHubCommit[]>([]);
   const [comments, setComments] = useState<GitHubComment[]>([]);
-  const [activeTab, setActiveTab] = useState<'overview' | 'commits' | 'changes' | 'conversation'>('overview');
+  const [executions, setExecutions] = useState<ExecutionRun[]>([]);
+  const [activeTab, setActiveTab] = useState<'overview' | 'commits' | 'changes' | 'conversation' | 'executions'>('overview');
 
   const owner = 'samrogu';
   const repo = 'rapid-config-server';
@@ -77,6 +80,37 @@ export default function MergeDetail({ isOpen, onClose, selectedMergeId }: MergeD
       setFiles(prFiles);
       setCommits(prCommits);
       setComments(prComments);
+
+      // Mock executions history
+      const mockExecutions: ExecutionRun[] = [
+        {
+          id: 'run-1204',
+          name: 'CI Pipeline #1204',
+          status: 'success',
+          startedAt: new Date(Date.now() - 1000 * 60 * 60 * 2).toISOString(),
+          duration: '4m 22s',
+          steps: [
+            { name: 'Build', status: 'success' },
+            { name: 'Unit Tests', status: 'success' },
+            { name: 'Security Scan', status: 'success' },
+            { name: 'Deploy Dev', status: 'success' },
+          ]
+        },
+        {
+          id: 'run-1198',
+          name: 'CI Pipeline #1198',
+          status: 'failed',
+          startedAt: new Date(Date.now() - 1000 * 60 * 60 * 5).toISOString(),
+          duration: '1m 15s',
+          steps: [
+            { name: 'Build', status: 'success' },
+            { name: 'Unit Tests', status: 'failed' },
+            { name: 'Security Scan', status: 'pending' },
+            { name: 'Deploy Dev', status: 'pending' },
+          ]
+        }
+      ];
+      setExecutions(mockExecutions);
 
       // Map reviews to approvers
       const mappedApprovers: Approver[] = reviews.map(r => ({
@@ -200,7 +234,8 @@ export default function MergeDetail({ isOpen, onClose, selectedMergeId }: MergeD
                   { id: 'overview', label: 'Overview', icon: Activity },
                   { id: 'commits', label: 'Commits', icon: GitCommit, count: commits.length },
                   { id: 'changes', label: 'Changes', icon: FileCode, count: files.length },
-                  { id: 'conversation', label: 'Conversation', icon: MessageSquare, count: comments.length }
+                  { id: 'conversation', label: 'Conversation', icon: MessageSquare, count: comments.length },
+                  { id: 'executions', label: 'Executions', icon: Terminal, count: executions.length }
                 ].map((tab) => (
                   <button
                     key={tab.id}
@@ -402,6 +437,67 @@ export default function MergeDetail({ isOpen, onClose, selectedMergeId }: MergeD
                             No comments yet.
                           </div>
                         )}
+                      </div>
+                    </div>
+                  )}
+
+                  {activeTab === 'executions' && (
+                    <div className="bg-surface-container-low rounded-[1.5rem] border border-white/5 overflow-hidden shadow-xl">
+                      <div className="px-6 py-4 bg-surface-high/50 border-b border-white/5 flex items-center gap-3">
+                        <Terminal className="text-primary" size={18} />
+                        <h3 className="text-xs font-black text-white uppercase tracking-[0.15em]">Execution History</h3>
+                      </div>
+                      <div className="divide-y divide-white/5">
+                        {executions.map((run) => (
+                          <div key={run.id} className="p-6 hover:bg-white/5 transition-all group">
+                            <div className="flex items-center justify-between mb-4">
+                              <div className="flex items-center gap-4">
+                                <div className={`w-10 h-10 rounded-xl flex items-center justify-center border ${
+                                  run.status === 'success' ? 'bg-tertiary/10 border-tertiary/20 text-tertiary' :
+                                  run.status === 'failed' ? 'bg-error/10 border-error/20 text-error' :
+                                  'bg-primary/10 border-primary/20 text-primary'
+                                }`}>
+                                  {run.status === 'success' ? <CheckCircle2 size={20} /> : <AlertCircle size={20} />}
+                                </div>
+                                <div>
+                                  <h4 className="text-sm font-black text-white">{run.name}</h4>
+                                  <div className="flex items-center gap-3 mt-1">
+                                    <span className="text-[10px] font-black text-on-surface-variant uppercase tracking-widest">{run.id}</span>
+                                    <span className="text-on-surface-variant/30">•</span>
+                                    <span className="text-[10px] text-on-surface-variant flex items-center gap-1">
+                                      <Clock size={10} /> {new Date(run.startedAt).toLocaleString()}
+                                    </span>
+                                  </div>
+                                </div>
+                              </div>
+                              <div className="text-right">
+                                <p className="text-[10px] font-black text-on-surface-variant uppercase tracking-widest mb-1">Duration</p>
+                                <p className="text-xs font-bold text-white">{run.duration}</p>
+                              </div>
+                            </div>
+                            
+                            <div className="flex items-center gap-2 overflow-x-auto pb-2 custom-scrollbar">
+                              {run.steps.map((step, sIdx) => (
+                                <div key={sIdx} className="flex items-center shrink-0">
+                                  <div className={`px-3 py-1.5 rounded-lg border text-[10px] font-bold flex items-center gap-2 ${
+                                    step.status === 'success' ? 'bg-tertiary/5 border-tertiary/20 text-tertiary' :
+                                    step.status === 'failed' ? 'bg-error/5 border-error/20 text-error' :
+                                    step.status === 'running' ? 'bg-primary/5 border-primary/20 text-primary animate-pulse' :
+                                    'bg-surface-high border-white/5 text-on-surface-variant'
+                                  }`}>
+                                    {step.status === 'success' ? <CheckCircle2 size={12} /> : 
+                                     step.status === 'failed' ? <AlertCircle size={12} /> : 
+                                     <Circle size={12} />}
+                                    {step.name}
+                                  </div>
+                                  {sIdx < run.steps.length - 1 && (
+                                    <ChevronRight size={12} className="text-on-surface-variant/30 mx-1" />
+                                  )}
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        ))}
                       </div>
                     </div>
                   )}

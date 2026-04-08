@@ -1,7 +1,7 @@
 import { Release, JiraTask, RepoStatus, PipelineStage } from './types';
 
 export const MOCK_TASKS: JiraTask[] = [
-  { id: 'OPS-1204', title: 'Critical memory leak in Auth Middleware', assignee: 'Alex R.', assigneePhoto: '', priority: 'High', status: 'In Progress', releaseId: '1', branch: 'feature/OPS-1204-memory-leak' },
+  { id: 'OPS-1204', title: 'Critical memory leak in Auth Middleware', assignee: 'Alex R.', assigneePhoto: '', priority: 'High', status: 'In Progress', releaseId: '1' },
   { id: 'OPS-1215', title: 'Refactor gRPC connection pooling', assignee: 'Sarah C.', assigneePhoto: '', priority: 'Medium', status: 'Resolved', releaseId: '1' },
   { id: 'OPS-1220', title: 'Update Kubernetes manifests for V2', assignee: 'James W.', assigneePhoto: '', priority: 'High', status: 'To Do', releaseId: '3' },
   { id: 'OPS-1225', title: 'Security patch for API Gateway', assignee: 'Alex R.', assigneePhoto: '', priority: 'High', status: 'Resolved', releaseId: '2' },

@@ -6,20 +6,19 @@ import {
   AlertCircle, 
   CheckCircle2,
   ChevronDown,
-  Book,
-  Clipboard
+  Book
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { fetchBranches, GitHubBranch } from '../services/githubService';
+import { createBranch, fetchBranches, GitHubBranch } from '../services/githubService';
 
 interface CreateBranchModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onSuccess: (repoName: string, branchName: string, baseBranch: string) => void;
+  onSuccess: (branchName: string) => void;
   owner: string;
-  repositories: { id: string; name: string; branch: string }[];
-  taskId: string;
-  taskTitle: string;
+  repositories: { id: string; name: string }[];
+  initialRepo?: string;
+  suggestedBranchName?: string;
 }
 
 export default function CreateBranchModal({ 
@@ -27,72 +26,64 @@ export default function CreateBranchModal({
   onClose, 
   onSuccess, 
   owner, 
-  repositories,
-  taskId,
-  taskTitle 
+  repositories, 
+  initialRepo,
+  suggestedBranchName 
 }: CreateBranchModalProps) {
   const [loading, setLoading] = useState(false);
   const [branchesLoading, setBranchesLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [branches, setBranches] = useState<GitHubBranch[]>([]);
   
-  const [selectedRepo, setSelectedRepo] = useState(repositories.length > 0 ? repositories[0].name : '');
+  const [selectedRepo, setSelectedRepo] = useState(initialRepo || (repositories.length > 0 ? repositories[0].name : ''));
+  const [branchName, setBranchName] = useState(suggestedBranchName || '');
   const [baseBranch, setBaseBranch] = useState('main');
-  const [newBranchName, setNewBranchName] = useState('');
 
   useEffect(() => {
-    if (isOpen) {
-      const slug = taskTitle.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
-      setNewBranchName(`feature/${taskId}-${slug}`);
-      
-      if (selectedRepo) {
-        loadBranches(selectedRepo);
-      }
+    if (isOpen && selectedRepo) {
+      loadBranches(selectedRepo);
     }
-  }, [isOpen, selectedRepo, taskId, taskTitle]);
+  }, [isOpen, selectedRepo]);
+
+  useEffect(() => {
+    if (suggestedBranchName) {
+      setBranchName(suggestedBranchName);
+    }
+  }, [suggestedBranchName]);
 
   const loadBranches = async (repoName: string) => {
     setBranchesLoading(true);
     setError(null);
     try {
-      // Find the default branch for this repo from our local data first
-      const repoData = repositories.find(r => r.name === repoName);
-      if (repoData) {
-        setBaseBranch(repoData.branch);
-      }
-
       const data = await fetchBranches(owner, repoName);
       setBranches(data);
-      
-      // If we fetched branches, and our current baseBranch isn't in the list, 
-      // try to find a sensible default
-      if (data.length > 0 && !data.find(b => b.name === baseBranch)) {
+      if (data.length > 0) {
         const mainBranch = data.find(b => b.name === 'main' || b.name === 'master');
         if (mainBranch) setBaseBranch(mainBranch.name);
         else setBaseBranch(data[0].name);
       }
     } catch (err) {
       console.error('Error fetching branches:', err);
-      // We don't block if branches fail to load, just use the local default
+      setError(`Failed to load branches for ${repoName}.`);
       setBranches([]);
     } finally {
       setBranchesLoading(false);
     }
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newBranchName || !selectedRepo || !baseBranch) return;
+    if (!branchName || !baseBranch || !selectedRepo) return;
 
     setLoading(true);
+    setError(null);
     try {
-      // Copy to clipboard
-      navigator.clipboard.writeText(newBranchName);
-      
-      onSuccess(selectedRepo, newBranchName, baseBranch);
+      await createBranch(owner, selectedRepo, branchName, baseBranch);
+      onSuccess(branchName);
       onClose();
     } catch (err: any) {
-      setError('Failed to process branch creation.');
+      console.error('Error creating branch:', err);
+      setError(err.message || 'Failed to create branch.');
     } finally {
       setLoading(false);
     }
@@ -114,7 +105,7 @@ export default function CreateBranchModal({
         initial={{ opacity: 0, scale: 0.9, y: 20 }}
         animate={{ opacity: 1, scale: 1, y: 0 }}
         exit={{ opacity: 0, scale: 0.9, y: 20 }}
-        className="relative w-full max-w-xl bg-surface-high border border-white/10 rounded-[2rem] shadow-2xl overflow-hidden flex flex-col"
+        className="relative w-full max-w-lg bg-surface-high border border-white/10 rounded-[2rem] shadow-2xl overflow-hidden flex flex-col"
       >
         {/* Header */}
         <div className="px-8 py-6 border-b border-white/5 flex items-center justify-between bg-surface-bright/30">
@@ -123,8 +114,8 @@ export default function CreateBranchModal({
               <GitBranch className="text-primary" size={20} />
             </div>
             <div>
-              <h2 className="text-xl font-black text-white tracking-tight">Create Branch</h2>
-              <p className="text-xs text-on-surface-variant font-bold uppercase tracking-widest">{taskId} • {taskTitle}</p>
+              <h2 className="text-xl font-black text-white tracking-tight">Create New Branch</h2>
+              <p className="text-xs text-on-surface-variant font-bold uppercase tracking-widest">Git Orchestration</p>
             </div>
           </div>
           <button 
@@ -144,69 +135,57 @@ export default function CreateBranchModal({
             </div>
           )}
 
-          <div className="space-y-4">
-            <div className="space-y-2">
-              <label className="text-[10px] font-black text-on-surface-variant uppercase tracking-widest ml-1">Select Repository</label>
-              <div className="relative">
-                <Book className="absolute left-4 top-1/2 -translate-y-1/2 text-primary" size={16} />
-                <select 
-                  required
-                  value={selectedRepo}
-                  onChange={(e) => setSelectedRepo(e.target.value)}
-                  className="w-full bg-surface-container-lowest border border-white/5 rounded-2xl py-3 pl-12 pr-4 text-sm focus:ring-2 focus:ring-primary/30 outline-none transition-all text-white appearance-none"
-                >
-                  {repositories.map(repo => (
-                    <option key={repo.id} value={repo.name}>{repo.name}</option>
-                  ))}
-                </select>
-                <ChevronDown className="absolute right-4 top-1/2 -translate-y-1/2 text-on-surface-variant pointer-events-none" size={16} />
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div className="space-y-2">
-                <label className="text-[10px] font-black text-on-surface-variant uppercase tracking-widest ml-1">Base Branch</label>
-                <div className="relative">
-                  <GitBranch className="absolute left-4 top-1/2 -translate-y-1/2 text-on-surface-variant" size={16} />
-                  <select 
-                    required
-                    value={baseBranch}
-                    onChange={(e) => setBaseBranch(e.target.value)}
-                    className="w-full bg-surface-container-lowest border border-white/5 rounded-2xl py-3 pl-12 pr-4 text-sm focus:ring-2 focus:ring-primary/30 outline-none transition-all text-white appearance-none"
-                  >
-                    {branchesLoading ? (
-                      <option>Loading branches...</option>
-                    ) : branches.length > 0 ? (
-                      branches.map(b => (
-                        <option key={b.name} value={b.name}>{b.name}</option>
-                      ))
-                    ) : (
-                      <option value={baseBranch}>{baseBranch}</option>
-                    )}
-                  </select>
-                  <ChevronDown className="absolute right-4 top-1/2 -translate-y-1/2 text-on-surface-variant pointer-events-none" size={16} />
-                </div>
-              </div>
-
-              <div className="space-y-2">
-                <label className="text-[10px] font-black text-on-surface-variant uppercase tracking-widest ml-1">New Branch Name</label>
-                <div className="relative">
-                  <input 
-                    required
-                    type="text" 
-                    value={newBranchName}
-                    onChange={(e) => setNewBranchName(e.target.value)}
-                    className="w-full bg-surface-container-lowest border border-white/5 rounded-2xl py-3 px-4 text-sm focus:ring-2 focus:ring-primary/30 outline-none transition-all text-white"
-                  />
-                </div>
-              </div>
+          <div className="space-y-2">
+            <label className="text-[10px] font-black text-on-surface-variant uppercase tracking-widest ml-1">Target Repository</label>
+            <div className="relative">
+              <Book className="absolute left-4 top-1/2 -translate-y-1/2 text-primary" size={16} />
+              <select 
+                required
+                value={selectedRepo}
+                onChange={(e) => setSelectedRepo(e.target.value)}
+                className="w-full bg-surface-container-lowest border border-white/5 rounded-2xl py-3 pl-12 pr-4 text-sm focus:ring-2 focus:ring-primary/30 outline-none transition-all text-white appearance-none"
+              >
+                {repositories.map(repo => (
+                  <option key={repo.id} value={repo.name}>{repo.name}</option>
+                ))}
+              </select>
+              <ChevronDown className="absolute right-4 top-1/2 -translate-y-1/2 text-on-surface-variant pointer-events-none" size={16} />
             </div>
           </div>
 
-          <div className="p-4 bg-primary/5 border border-primary/10 rounded-2xl">
-            <p className="text-xs text-on-surface-variant leading-relaxed">
-              <span className="text-primary font-bold">Tip:</span> The branch name will be copied to your clipboard. You'll be redirected to GitHub to create the branch from the <span className="text-white font-mono">{baseBranch}</span> base.
-            </p>
+          <div className="space-y-2">
+            <label className="text-[10px] font-black text-on-surface-variant uppercase tracking-widest ml-1">Branch Name</label>
+            <input 
+              required
+              type="text" 
+              value={branchName}
+              onChange={(e) => setBranchName(e.target.value.replace(/\s+/g, '-').toLowerCase())}
+              placeholder="e.g., feature/auth-fix"
+              className="w-full bg-surface-container-lowest border border-white/5 rounded-2xl py-3 px-4 text-sm focus:ring-2 focus:ring-primary/30 outline-none transition-all text-white placeholder-on-surface-variant/30 font-mono"
+            />
+          </div>
+
+          <div className="space-y-2">
+            <label className="text-[10px] font-black text-on-surface-variant uppercase tracking-widest ml-1">Base Branch</label>
+            <div className="relative">
+              <GitBranch className="absolute left-4 top-1/2 -translate-y-1/2 text-on-surface-variant" size={16} />
+              <select 
+                required
+                value={baseBranch}
+                onChange={(e) => setBaseBranch(e.target.value)}
+                disabled={branchesLoading}
+                className="w-full bg-surface-container-lowest border border-white/5 rounded-2xl py-3 pl-12 pr-4 text-sm focus:ring-2 focus:ring-primary/30 outline-none transition-all text-white appearance-none disabled:opacity-50"
+              >
+                {branchesLoading ? (
+                  <option>Loading branches...</option>
+                ) : (
+                  branches.map(b => (
+                    <option key={b.name} value={b.name}>{b.name}</option>
+                  ))
+                )}
+              </select>
+              <ChevronDown className="absolute right-4 top-1/2 -translate-y-1/2 text-on-surface-variant pointer-events-none" size={16} />
+            </div>
           </div>
         </form>
 
@@ -221,15 +200,20 @@ export default function CreateBranchModal({
           </button>
           <button 
             onClick={handleSubmit}
-            disabled={loading || !newBranchName}
-            className="px-8 py-2.5 bg-primary text-on-primary rounded-xl text-sm font-black shadow-lg shadow-primary/20 hover:scale-[1.02] active:scale-[0.98] transition-all flex items-center gap-2 disabled:opacity-50"
+            disabled={loading || branchesLoading || !branchName}
+            className="px-8 py-2.5 bg-primary text-on-primary rounded-xl text-sm font-black shadow-lg shadow-primary/20 hover:scale-[1.02] active:scale-[0.98] transition-all flex items-center gap-2 disabled:opacity-50 disabled:scale-100"
           >
             {loading ? (
-              <Loader2 size={18} className="animate-spin" />
+              <>
+                <Loader2 size={18} className="animate-spin" />
+                <span>Creating...</span>
+              </>
             ) : (
-              <CheckCircle2 size={18} />
+              <>
+                <CheckCircle2 size={18} />
+                <span>Create Branch</span>
+              </>
             )}
-            <span>Create & Open GitHub</span>
           </button>
         </div>
       </motion.div>
